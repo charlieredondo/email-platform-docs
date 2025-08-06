@@ -1,0 +1,1008 @@
+openapi: 3.0.3
+info:
+  title: Email Platform API
+  description: |
+    Multitenant transactional email platform API for sending, tracking, and managing email campaigns.
+    
+    ## Authentication
+    All API endpoints require authentication via API Key or JWT token.
+    - API Key: Include `X-API-Key` header for external integrations
+    - JWT Token: Include `Authorization: Bearer <token>` header for web app access
+    
+    ## Tenant Isolation
+    All requests must include `X-Tenant-ID` header to ensure proper tenant isolation.
+    
+    ## Rate Limiting
+    - API Key: 1000 requests/minute per tenant (configurable)
+    - JWT Token: 10000 requests/minute per user
+    
+    ## Webhooks
+    The platform supports webhooks for email events (delivery, bounce, complaint, etc.)
+    Configure webhook URLs in the admin dashboard.
+  version: 1.0.0
+  contact:
+    name: Email Platform Support
+    email: support@emailplatform.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.emailplatform.com/v1
+    description: Production server
+  - url: https://staging-api.emailplatform.com/v1
+    description: Staging server
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+tags:
+  - name: emails
+    description: Email sending and tracking operations
+  - name: templates
+    description: Email template management
+  - name: analytics
+    description: Email analytics and reporting
+  - name: configuration
+    description: Tenant configuration management
+  - name: webhooks
+    description: Webhook management and event handling
+
+paths:
+  /emails/send:
+    post:
+      tags:
+        - emails
+      summary: Send a transactional email
+      description: |
+        Send a transactional email using a predefined template.
+        The email will be queued for processing and delivery status can be tracked.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendEmailRequest'
+            examples:
+              order_confirmation:
+                summary: Order confirmation email
+                value:
+                  type: "order_confirmation"
+                  recipient:
+                    email: "customer@example.com"
+                    name: "John Doe"
+                  data:
+                    order_number: "ORD-12345"
+                    items:
+                      - name: "Product A"
+                        quantity: 2
+                        price: 29.99
+                    total: 59.98
+                    customer_name: "John Doe"
+                  options:
+                    priority: "high"
+                    additional_recipients: ["manager@company.com"]
+      responses:
+        '200':
+          description: Email queued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendEmailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /emails/{emailId}/status:
+    get:
+      tags:
+        - emails
+      summary: Get email delivery status
+      description: Retrieve the current status and event history for a specific email
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: emailId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Unique identifier for the email
+      responses:
+        '200':
+          description: Email status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /emails:
+    get:
+      tags:
+        - emails
+      summary: List emails
+      description: Retrieve a paginated list of emails with optional filtering
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by email type
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, sent, delivered, bounced, complained]
+          description: Filter by email status
+        - name: recipient
+          in: query
+          schema:
+            type: string
+          description: Filter by recipient email
+        - name: from_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter emails sent after this date
+        - name: to_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter emails sent before this date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Number of results per page
+      responses:
+        '200':
+          description: Emails retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailList'
+
+  /templates:
+    get:
+      tags:
+        - templates
+      summary: List email templates
+      description: Retrieve all active email templates for the tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by template type
+      responses:
+        '200':
+          description: Templates retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateList'
+
+    post:
+      tags:
+        - templates
+      summary: Create email template
+      description: Create a new email template with XSLT content
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /templates/{templateId}:
+    get:
+      tags:
+        - templates
+      summary: Get email template
+      description: Retrieve a specific email template
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Template retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - templates
+      summary: Update email template
+      description: Update an existing email template
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateRequest'
+      responses:
+        '200':
+          description: Template updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - templates
+      summary: Delete email template
+      description: Delete an email template (marks as inactive)
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Template deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /templates/{templateId}/preview:
+    post:
+      tags:
+        - templates
+      summary: Preview email template
+      description: Generate a preview of the email template with sample data
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewTemplateRequest'
+      responses:
+        '200':
+          description: Preview generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplatePreview'
+
+  /analytics/dashboard:
+    get:
+      tags:
+        - analytics
+      summary: Get dashboard analytics
+      description: Retrieve aggregated email analytics for dashboard display
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [7d, 30d, 90d]
+            default: 30d
+          description: Time period for analytics
+        - name: email_type
+          in: query
+          schema:
+            type: string
+          description: Filter by email type
+      responses:
+        '200':
+          description: Analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardAnalytics'
+
+  /analytics/reports:
+    get:
+      tags:
+        - analytics
+      summary: Generate detailed reports
+      description: Generate detailed analytics reports with export options
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: from_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv, xlsx]
+            default: json
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month, email_type]
+            default: day
+      responses:
+        '200':
+          description: Report generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsReport'
+
+  /configuration:
+    get:
+      tags:
+        - configuration
+      summary: Get tenant configuration
+      description: Retrieve current tenant configuration settings
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantConfiguration'
+
+    put:
+      tags:
+        - configuration
+      summary: Update tenant configuration
+      description: Update tenant configuration settings
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConfigurationRequest'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantConfiguration'
+
+  /webhooks/ses:
+    post:
+      tags:
+        - webhooks
+      summary: SES webhook endpoint
+      description: |
+        Webhook endpoint for receiving SES events (delivery, bounce, complaint, etc.)
+        This endpoint is called by AWS SES automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SESWebhookPayload'
+      responses:
+        '200':
+          description: Webhook processed successfully
+        '400':
+          description: Invalid webhook payload
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Tenant identifier for multitenant isolation
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    SendEmailRequest:
+      type: object
+      required:
+        - type
+        - recipient
+        - data
+      properties:
+        type:
+          type: string
+          description: Email template type
+          example: "order_confirmation"
+        recipient:
+          $ref: '#/components/schemas/EmailRecipient'
+        data:
+          type: object
+          description: Template data for variable substitution
+          additionalProperties: true
+          example:
+            order_number: "ORD-12345"
+            customer_name: "John Doe"
+            total: 99.99
+        options:
+          $ref: '#/components/schemas/EmailOptions'
+
+    EmailRecipient:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          description: Recipient email address
+          example: "customer@example.com"
+        name:
+          type: string
+          description: Recipient display name
+          example: "John Doe"
+
+    EmailOptions:
+      type: object
+      properties:
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+          default: normal
+          description: Email priority level
+        additional_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+          description: Additional TO recipients
+        cc_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+          description: CC recipients
+        bcc_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+          description: BCC recipients
+        custom_headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom email headers
+
+    SendEmailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        email_id:
+          type: string
+          format: uuid
+          description: Unique identifier for the email
+        message_id:
+          type: string
+          description: SES message identifier
+        status:
+          type: string
+          enum: [queued, sending]
+          description: Initial email status
+        queued_at:
+          type: string
+          format: date-time
+          description: When the email was queued
+
+    EmailStatus:
+      type: object
+      properties:
+        email_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, sending, sent, delivered, bounced, complained, failed]
+        recipient:
+          $ref: '#/components/schemas/EmailRecipient'
+        subject:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailEvent'
+
+    EmailEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [send, delivery, bounce, complaint, open, click, reject]
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Event-specific metadata
+
+    EmailList:
+      type: object
+      properties:
+        emails:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailSummary'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    EmailSummary:
+      type: object
+      properties:
+        email_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        recipient:
+          $ref: '#/components/schemas/EmailRecipient'
+        subject:
+          type: string
+        status:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+
+    Template:
+      type: object
+      properties:
+        template_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        version:
+          type: integer
+        subject_template:
+          type: string
+        from_email:
+          type: string
+          format: email
+        from_name:
+          type: string
+        xslt_content:
+          type: string
+        html_preview:
+          type: string
+        is_active:
+          type: boolean
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVariable'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TemplateVariable:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [string, number, date, datetime, boolean, object, array]
+        description:
+          type: string
+        is_required:
+          type: boolean
+        default_value:
+          type: string
+
+    TemplateList:
+      type: object
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+
+    CreateTemplateRequest:
+      type: object
+      required:
+        - type
+        - subject_template
+        - from_email
+        - xslt_content
+      properties:
+        type:
+          type: string
+        subject_template:
+          type: string
+        from_email:
+          type: string
+          format: email
+        from_name:
+          type: string
+        xslt_content:
+          type: string
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVariable'
+
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        subject_template:
+          type: string
+        from_email:
+          type: string
+          format: email
+        from_name:
+          type: string
+        xslt_content:
+          type: string
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVariable'
+
+    PreviewTemplateRequest:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: Sample data for template rendering
+
+    TemplatePreview:
+      type: object
+      properties:
+        subject:
+          type: string
+        html_content:
+          type: string
+        text_content:
+          type: string
+
+    DashboardAnalytics:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/AnalyticsSummary'
+        charts:
+          $ref: '#/components/schemas/AnalyticsCharts'
+
+    AnalyticsSummary:
+      type: object
+      properties:
+        total_sent:
+          type: integer
+        delivered:
+          type: integer
+        opened:
+          type: integer
+        clicked:
+          type: integer
+        bounced:
+          type: integer
+        complained:
+          type: integer
+        delivery_rate:
+          type: number
+          format: float
+        open_rate:
+          type: number
+          format: float
+        click_rate:
+          type: number
+          format: float
+
+    AnalyticsCharts:
+      type: object
+      properties:
+        daily_volume:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesData'
+        delivery_rates:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesData'
+        top_performing_emails:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailTypeMetrics'
+
+    TimeSeriesData:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        value:
+          type: number
+
+    EmailTypeMetrics:
+      type: object
+      properties:
+        email_type:
+          type: string
+        sent:
+          type: integer
+        delivered:
+          type: integer
+        opened:
+          type: integer
+        clicked:
+          type: integer
+
+    AnalyticsReport:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/DateRange'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportData'
+        export_url:
+          type: string
+          format: uri
+          description: URL to download exported report
+
+    DateRange:
+      type: object
+      properties:
+        from_date:
+          type: string
+          format: date-time
+        to_date:
+          type: string
+          format: date-time
+
+    ReportData:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        email_type:
+          type: string
+        metrics:
+          $ref: '#/components/schemas/AnalyticsSummary'
+
+    TenantConfiguration:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        subdomain:
+          type: string
+        settings:
+          $ref: '#/components/schemas/TenantSettings'
+        retention_policy_days:
+          type: integer
+          enum: [30, 60, 90]
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+
+    TenantSettings:
+      type: object
+      properties:
+        default_from_email:
+          type: string
+          format: email
+        default_from_name:
+          type: string
+        webhook_url:
+          type: string
+          format: uri
+        webhook_secret:
+          type: string
+        rate_limits:
+          $ref: '#/components/schemas/RateLimits'
+        email_configurations:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/EmailTypeConfiguration'
+
+    RateLimits:
+      type: object
+      properties:
+        emails_per_minute:
+          type: integer
+          default: 1000
+        api_calls_per_minute:
+          type: integer
+          default: 10000
+
+    EmailTypeConfiguration:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        additional_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+        cc_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+        bcc_recipients:
+          type: array
+          items:
+            type: string
+            format: email
+
+    UpdateConfigurationRequest:
+      type: object
+      properties:
+        settings:
+          $ref: '#/components/schemas/TenantSettings'
+        retention_policy_days:
+          type: integer
+          enum: [30, 60, 90]
+
+    SESWebhookPayload:
+      type: object
+      properties:
+        Type:
+          type: string
+        Message:
+          type: string
+        MessageId:
+          type: string
+        TopicArn:
+          type: string
+        Timestamp:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
